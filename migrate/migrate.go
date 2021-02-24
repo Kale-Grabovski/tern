@@ -64,7 +64,7 @@ type MigratorOptions struct {
 }
 
 type Migrator struct {
-	conn         *pgx.Conn
+	conn         Connector
 	versionTable string
 	options      *MigratorOptions
 	Migrations   []*Migration
@@ -73,17 +73,24 @@ type Migrator struct {
 }
 
 // NewMigrator initializes a new Migrator. It is highly recommended that versionTable be schema qualified.
-func NewMigrator(ctx context.Context, conn *pgx.Conn, versionTable string) (m *Migrator, err error) {
+func NewMigrator(ctx context.Context, conn Connector, versionTable string) (m *Migrator, err error) {
 	return NewMigratorEx(ctx, conn, versionTable, &MigratorOptions{MigratorFS: defaultMigratorFS{}})
 }
 
 // NewMigratorEx initializes a new Migrator. It is highly recommended that versionTable be schema qualified.
-func NewMigratorEx(ctx context.Context, conn *pgx.Conn, versionTable string, opts *MigratorOptions) (m *Migrator, err error) {
+func NewMigratorEx(ctx context.Context, conn Connector, versionTable string, opts *MigratorOptions) (m *Migrator, err error) {
 	m = &Migrator{conn: conn, versionTable: versionTable, options: opts}
 	err = m.ensureSchemaVersionTableExists(ctx)
 	m.Migrations = make([]*Migration, 0)
 	m.Data = make(map[string]interface{})
 	return
+}
+
+type Connector interface {
+	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
+	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
 type MigratorFS interface {
@@ -270,12 +277,12 @@ func (m *Migrator) Migrate(ctx context.Context) error {
 // Lock to ensure multiple migrations cannot occur simultaneously
 const lockNum = int64(9628173550095224) // arbitrary random number
 
-func acquireAdvisoryLock(ctx context.Context, conn *pgx.Conn) error {
+func acquireAdvisoryLock(ctx context.Context, conn Connector) error {
 	_, err := conn.Exec(ctx, "select pg_advisory_lock($1)", lockNum)
 	return err
 }
 
-func releaseAdvisoryLock(ctx context.Context, conn *pgx.Conn) error {
+func releaseAdvisoryLock(ctx context.Context, conn Connector) error {
 	_, err := conn.Exec(ctx, "select pg_advisory_unlock($1)", lockNum)
 	return err
 }
